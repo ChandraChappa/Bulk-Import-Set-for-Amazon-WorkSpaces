@@ -1,0 +1,49 @@
+(function runTransformScript(source, map, log, target /*undefined onStart*/ ) {
+
+	// Add your code here
+var params = {};
+params.sysparm_productSysId = '26e5e61d1bb7f010d121eac5624bcb75';
+params.sysparm_provisionedProductSysId = '';
+params.sysparm_pageToken = null;
+
+var obj = new x_126749_aws_sc.ServiceCatalogServer();
+var x = obj.getLaunchPathsServer(params);
+var y = obj.getProvisioningArtifactsServer(params);
+
+
+var launchID = JSON.parse(x).result.LaunchPathSummaries[0].Id;
+var provisionArtifactId = JSON.parse(y).result.ProvisioningArtifacts[0].Id;
+	
+try{
+		/* Rest Api Call - To get ProvisioningArtifcatID, Launch Path ID*/
+        var ppArray = [];
+        ppArray.push({"Key" : "UserName", "Value":target.u_username.toString()});
+        ppArray.push({"Key" : "WorkstationType", "Value":target.u_workstation_type.toString()});
+        var ppJSONString = JSON.stringify(ppArray);
+         var cart = new sn_sc.CartJS(); // JS Cart API from Scope App to checkout catalog item
+		var uqr = Math.floor(Math.random()*1000);
+		var ppName = target.u_username.toString() + target.u_workstation_type.toString() + uqr.toString();
+	    var tagArray =[];
+        tagArray.push({"Key" :"Cost Center", "Value":"ACN00007"}); // Comment this line if no tags
+        var tagJSONString = JSON.stringify(tagArray);//comment this line if no tags
+	
+	var item = {
+		'sysparm_id': '26e5e61d1bb7f010d121eac5624bcb75',
+		'sysparm_quantity': '1',
+		'variables':{
+			'ProvisionedProductName': ppName.toString(),
+			'PathId': launchID,
+			'ProvisioningArtifactId': 'pa-cpxrw3jmaiaye',
+			'ProvisioningParameters': ppJSONString,
+			'Tags': tagJSONString // Comment this line if no tags
+		}
+	};
+	var cartDetails = cart.orderNow(item); // Disable two-step checkout in ServiceCatalog	
+	gs.info(cartDetails);
+	
+}
+catch(ex)
+	{
+	gs.info(ex);
+}
+})(source, map, log, target);

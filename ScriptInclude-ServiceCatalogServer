@@ -1,0 +1,185 @@
+var ServiceCatalogServer = /** @class */ (function (_super) {
+    Polyfill.__extends(ServiceCatalogServer, _super);
+    function ServiceCatalogServer() {
+        return _super !== null && _super.apply(this, arguments) || this;
+    }
+	
+	ServiceCatalogServer.prototype.getLaunchPathsServer = function (params) {
+        return this._withProductAndCatalog('retrieve launch paths', params, function (params) {
+            var cred;
+            try {
+                cred = params.cred.as(AwsCredentials.User.End);
+            }
+            catch (ex) {
+                return this._errorResponse(ex.message);
+            }
+            var serviceCatalog = this._getServiceCatalog(params.region, cred);
+            var options = params.pageToken ? { PageToken: params.pageToken } : undefined;
+            return serviceCatalog.listLaunchPaths(params.product.awsproductid.toString(), options);
+        });
+    };
+    ServiceCatalogServer.prototype.getProvisioningArtifactsServer = function (params) {
+        return this._withProductAndCatalog('retrieve provisioning artifacts', params, function (params) {
+            var cred;
+            try {
+                cred = params.cred.as(AwsCredentials.User.End);
+            }
+            catch (ex) {
+                return this._errorResponse(ex.message);
+            }
+            var serviceCatalog = this._getServiceCatalog(params.region, cred);
+            return serviceCatalog.describeProductView(params.product.awsid.toString());
+        });
+    };
+    ServiceCatalogServer.prototype.getProvisioningParametersServer = function (params) {
+        return this._withProductAndCatalog('retrieve provisioning parameters', params,  function (params) {
+            var cred;
+            try {
+                cred = params.cred.as(AwsCredentials.User.End);
+            }
+            catch (ex) {
+                return this._errorResponse(ex.message);
+            }
+            var launchPathId = params.sysparm_launchPathId, artifactId = params.sysparm_provisioningArtifactId;
+            if (this._isMissing(launchPathId)) {
+                return this._missingParameter('launchPathId');
+            }
+            else if (this._isMissing(artifactId)) {
+                return this._missingParameter('provisioningArtifactId');
+            }
+            var serviceCatalog = this._getServiceCatalog(params.region, cred);
+            var describePPResponse = serviceCatalog.describeProvisioningParameters(params.product.awsproductid.toString(), artifactId, launchPathId);
+            if (describePPResponse.haveError() || !params.provisionedProduct) {
+                return describePPResponse;
+            }
+            // get current stack parameters and set any "IsNoEcho" values in the new model to "****"
+            var newModel = describePPResponse.deserialize();
+            var secrets = {};
+            newModel.ProvisioningArtifactParameters.forEach(function (p) {
+                secrets[p.ParameterKey] = p.IsNoEcho;
+            });
+            var provisioningParameters = params.provisionedProduct.loadProvisioningParameters();
+            newModel.StackParameters = provisioningParameters.reduce(function (arr, stackParameter) {
+                if (secrets[stackParameter.ParameterKey]) {
+                    stackParameter.ParameterValue = "****";
+                }
+                arr.push(stackParameter);
+                return arr;
+            }, []);
+            return this._response(newModel);
+        });
+    };
+    // Gets tags defined on the product within ServiceNow.
+    // ServiceNow tags are simple labels without values, we just return the list of values.
+    ServiceCatalogServer.prototype.getAdditionalTags = function () {
+        var validateProduct;
+        try {
+            validateProduct = this._validateProduct('get additional tags');
+        }
+        catch (err) {
+            return this._errorResponse(err.message);
+        }
+        var product = validateProduct.product;
+        var tagsGr = this._getTags(product.sys_id.toString());
+        var tags = [];
+        while (tagsGr.next()) {
+            // avoid null label name, which we can get if ACLs forbid reading the name (_getTags uses GlideRecordSecure)
+            if (tagsGr.label.name) {
+                var tagName = tagsGr.label.name.toString();
+                tags.push(tagName);
+            }
+        }
+        return this._response(JSON.stringify(tags));
+    };
+    // enforce (product-sys-id is set) xor (provisioned-product-sys-id is set)
+    ServiceCatalogServer.prototype._validateProduct = function (description,params) {
+        var productSysId = params.sysparm_productSysId;
+        var provisionedProductSysId = params.sysparm_provisionedProductSysId;
+        var product, provProd = null;
+        if (provisionedProductSysId) {
+            if (productSysId) {
+                throw new Error('Specify either a product ID or provisioned product ID');
+            }
+            provProd = ProvisionedProduct.from(provisionedProductSysId);
+            if (!provProd || !provProd.actions.update().isPermitted()) {
+                throw new Error('Access denied');
+            }
+            product = provProd.getProduct();
+        }
+        else {
+            if (!productSysId) {
+                throw new Error('Specify either a product ID or provisioned product ID');
+            }
+            product = this._getProduct(productSysId);
+            if (!ProductUserCriteria.mayView(gs.getUserID(), productSysId)) {
+                var qualifier = provisionedProductSysId
+                    ? 'provisioned product ' + provisionedProductSysId
+                    : 'product ' + productSysId;
+                throw new Error('Unable to ' + description + ' for ' + qualifier + ': access denied');
+            }
+        }
+        if (!product) {
+            var qualifier1 = provisionedProductSysId
+                ? 'provisioned product ' + provisionedProductSysId
+                : 'product ' + productSysId;
+            throw new Error('Unable to ' + description + ' for ' + qualifier1 + ': could not obtain product data');
+        }
+        return {
+            product: product,
+            provisionedProduct: provProd
+        };
+    };
+    ServiceCatalogServer.prototype._withProductAndCatalog = function (description,params, fn) {
+        var validateProduct;
+        try {
+            validateProduct = this._validateProduct(description,params);
+        }
+        catch (err) {
+            return this._errorResponse(err.message);
+        }
+        var product = validateProduct.product, pageToken = params.sysparm_pageToken, region = product.awsregion.toString();
+        try {
+            var cred = void 0;
+            try {
+                cred = AwsCredentials.from(product);
+            }
+            catch (ex) {
+                return this._errorResponse("Could not establish credentials for this role: " + ex.message);
+            }
+            var response_1 = fn.call(this, {
+                region: region,
+                cred: cred,
+                pageToken: pageToken,
+                product: product,
+                provisionedProduct: validateProduct.provisionedProduct
+            });
+            if ((typeof response_1) === 'string') {
+                return response_1;
+            }
+            else if (!response_1.haveError()) {
+                return this._response(response_1.getBody());
+            }
+            else {
+                var msg = 'Unable to ' + description + ' for product';
+                gs.debug(msg + ": product=" + product.sys_id.toString() + ", reason=" + response_1.getBody());
+                return this._errorResponse(msg);
+            }
+        }
+        catch (ex) {
+            var log = 'Error trying to ' + description + ': product=' + product.sys_id.toString();
+            if (ex['message']) {
+                log += ', reason=' + ex.message;
+            }
+            gs.info(log);
+            return this._errorResponse('Error trying to ' + description + ' for product');
+        }
+    };
+    ServiceCatalogServer.prototype._getTags = function (productSysId) {
+        var labelEntryGr = new GlideRecordSecure('label_entry');
+        labelEntryGr.addQuery('table_key', productSysId);
+        labelEntryGr.query();
+        return labelEntryGr;
+    };
+    return ServiceCatalogServer;
+}(AbstractAwsAjaxProcessor));
+ServiceCatalogServer.prototype.type = 'ServiceCatalogServer';
