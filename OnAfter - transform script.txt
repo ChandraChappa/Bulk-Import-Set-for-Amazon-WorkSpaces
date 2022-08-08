@@ -2,7 +2,7 @@
 
 	// Add your code here
 var params = {};
-params.sysparm_productSysId = '26e5e61d1bb7f010d121eac5624bcb75';
+params.sysparm_productSysId = '26e5e61d1bb7f010d121eac5624bcb75'; // Replace with your catalog item sys_id
 params.sysparm_provisionedProductSysId = '';
 params.sysparm_pageToken = null;
 
@@ -28,7 +28,7 @@ try{
         var tagJSONString = JSON.stringify(tagArray);//comment this line if no tags
 	
 	var item = {
-		'sysparm_id': '26e5e61d1bb7f010d121eac5624bcb75',
+		'sysparm_id': '26e5e61d1bb7f010d121eac5624bcb75',   // Replace with your catalog item sys_id
 		'sysparm_quantity': '1',
 		'variables':{
 			'ProvisionedProductName': ppName.toString(),
